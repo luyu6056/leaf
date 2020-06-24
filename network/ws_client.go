@@ -1,10 +1,12 @@
 package network
 
 import (
-	"github.com/gorilla/websocket"
-	"github.com/name5566/leaf/log"
+	"net"
 	"sync"
 	"time"
+
+	"github.com/gorilla/websocket"
+	"github.com/luyu6056/leaf/log"
 )
 
 type WSClient struct {
@@ -18,7 +20,7 @@ type WSClient struct {
 	AutoReconnect    bool
 	NewAgent         func(*WSConn) Agent
 	dialer           websocket.Dialer
-	conns            WebsocketConnSet
+	conns            map[wsClientConn]struct{}
 	wg               sync.WaitGroup
 	closeFlag        bool
 }
@@ -63,18 +65,18 @@ func (client *WSClient) init() {
 		log.Fatal("client is running")
 	}
 
-	client.conns = make(WebsocketConnSet)
+	client.conns = make(map[wsClientConn]struct{})
 	client.closeFlag = false
 	client.dialer = websocket.Dialer{
 		HandshakeTimeout: client.HandshakeTimeout,
 	}
 }
 
-func (client *WSClient) dial() *websocket.Conn {
+func (client *WSClient) dial() wsClientConn {
 	for {
 		conn, _, err := client.dialer.Dial(client.Addr, nil)
 		if err == nil || client.closeFlag {
-			return conn
+			return wsClientConn{conn}
 		}
 
 		log.Release("connect to %v error: %v", client.Addr, err)
@@ -88,7 +90,7 @@ func (client *WSClient) connect() {
 
 reconnect:
 	conn := client.dial()
-	if conn == nil {
+	if conn.Conn == nil {
 		return
 	}
 	conn.SetReadLimit(int64(client.MaxMsgLen))
@@ -104,7 +106,15 @@ reconnect:
 
 	wsConn := newWSConn(conn, client.PendingWriteNum, client.MaxMsgLen)
 	agent := client.NewAgent(wsConn)
-	agent.Run()
+	agent.OnInit()
+	for {
+		in, err := wsConn.ReadMsg(nil)
+		if err != nil {
+			log.Debug("WSClient read error: %v", err)
+			break
+		}
+		agent.React(in)
+	}
 
 	// cleanup
 	wsConn.Close()
@@ -129,4 +139,25 @@ func (client *WSClient) Close() {
 	client.Unlock()
 
 	client.wg.Wait()
+}
+
+type wsClientConn struct {
+	*websocket.Conn
+}
+
+func (ws wsClientConn) ReadMsg(buf []byte) ([]byte, error) {
+	_, b, err := ws.ReadMessage()
+	return b, err
+}
+func (ws wsClientConn) WriteMsg(msg []byte) error {
+	return ws.WriteMessage(websocket.BinaryMessage, msg)
+}
+func (ws wsClientConn) LocalAddr() net.Addr {
+	return ws.LocalAddr()
+}
+func (ws wsClientConn) RemoteAddr() net.Addr {
+	return ws.RemoteAddr()
+}
+func (ws wsClientConn) Close() error {
+	return ws.Close()
 }

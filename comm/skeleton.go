@@ -1,11 +1,11 @@
 package comm
 
 import (
-	"github.com/name5566/leaf/chanrpc"
-	"github.com/name5566/leaf/module"
+	"github.com/luyu6056/leaf/chanrpc"
+	"github.com/luyu6056/leaf/module"
 )
 
-func NewSkeleton() * module.Skeleton {
+func NewSkeleton() *module.Skeleton {
 	skeleton := &module.Skeleton{
 		GoLen:              10000,
 		TimerDispatcherLen: 10000,

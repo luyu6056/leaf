@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/name5566/leaf/log"
+	"github.com/luyu6056/leaf/log"
 )
 
 type TCPClient struct {
@@ -16,7 +16,7 @@ type TCPClient struct {
 	ConnectInterval time.Duration
 	PendingWriteNum int
 	AutoReconnect   bool
-	NewAgent        func(*TCPConn) Agent
+	NewAgent        func(Conn) Agent
 	conns           ConnSet
 	wg              sync.WaitGroup
 	closeFlag       bool
@@ -34,7 +34,6 @@ type TCPClient struct {
 
 func (client *TCPClient) Start() {
 	client.init()
-
 	for i := 0; i < client.ConnNum; i++ {
 		client.wg.Add(1)
 		go client.connect()
@@ -120,8 +119,17 @@ reconnect:
 			agent.OnClose()
 
 		}()
+		agent.OnInit()
+		buf := make([]byte, client.MaxMsgLen)
+		for {
+			in, err := client.msgParser.Read(tcpConn, buf)
+			if err != nil {
+				log.Debug("TCPClient read error: %v", err)
+				return
+			}
+			agent.React(in)
+		}
 
-		agent.Run()
 	})
 
 	if client.AutoReconnect {
@@ -130,7 +138,7 @@ reconnect:
 	}
 }
 
-func (client *TCPClient) Close() {
+func (client *TCPClient) Close() error {
 	client.Lock()
 	client.closeFlag = true
 	for conn := range client.conns {
@@ -140,6 +148,7 @@ func (client *TCPClient) Close() {
 	client.Unlock()
 
 	//client.wg.Wait()
+	return nil
 }
 
 func try(f func()) {

@@ -2,9 +2,10 @@ package network
 
 import (
 	//"bytes"
-	"github.com/name5566/leaf/log"
 	"net"
 	"sync"
+
+	"github.com/luyu6056/leaf/log"
 )
 
 type ConnSet map[net.Conn]struct{}
@@ -62,17 +63,6 @@ func (tcpConn *TCPConn) Destroy() {
 	tcpConn.doDestroy()
 }
 
-func (tcpConn *TCPConn) Close() {
-	tcpConn.Lock()
-	defer tcpConn.Unlock()
-	if tcpConn.closeFlag {
-		return
-	}
-
-	tcpConn.doWrite(nil)
-	tcpConn.closeFlag = true
-}
-
 func (tcpConn *TCPConn) doWrite(b []byte) {
 	if len(tcpConn.writeChan) == cap(tcpConn.writeChan) {
 		if tcpConn.chanStop {
@@ -112,6 +102,9 @@ func (tcpConn *TCPConn) ReadMsg(buf []byte) ([]byte, error) {
 	return tcpConn.msgParser.Read(tcpConn, buf)
 }
 
-func (tcpConn *TCPConn) WriteMsg(args ...[]byte) error {
-	return tcpConn.msgParser.Write(tcpConn, args...)
+func (tcpConn *TCPConn) WriteMsg(msg []byte) error {
+	return tcpConn.msgParser.Write(tcpConn, msg)
+}
+func (tcpConn *TCPConn) Close() error {
+	return tcpConn.conn.Close()
 }

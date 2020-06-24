@@ -1,23 +1,19 @@
 package network
 
 import (
-	"github.com/name5566/leaf/log"
-	"net"
 	"runtime/debug"
-	"sync"
+	"sync/atomic"
 	"time"
+
+	"github.com/luyu6056/gnet"
+	"github.com/luyu6056/leaf/log"
 )
 
 type TCPServer struct {
-	Addr            string
-	MaxConnNum      int
-	PendingWriteNum int
-	NewAgent        func(*TCPConn) Agent
-	ln              net.Listener
-	conns           ConnSet
-	mutexConns      sync.Mutex
-	wgLn            sync.WaitGroup
-	wgConns         sync.WaitGroup
+	connsNum   int32
+	Addr       string
+	MaxConnNum int
+	NewAgent   func(Conn) Agent
 
 	// msg parser
 	LenMsgLen      int
@@ -27,113 +23,70 @@ type TCPServer struct {
 	LenMsgLenInMsg bool // if the msg len contain in "header" len
 	msgParser      *MsgParser
 	ChanStop       bool
+	gnet.EventHandler
+	Close func()
 }
 
 func (server *TCPServer) Start() {
 	server.init()
-	go server.run()
 }
 
 func (server *TCPServer) init() {
-	ln, err := net.Listen("tcp", server.Addr)
-	if err != nil {
-		log.Fatal("%v", err)
-	}
 
 	if server.MaxConnNum <= 0 {
 		server.MaxConnNum = 100
 		log.Release("invalid MaxConnNum, reset to %v", server.MaxConnNum)
 	}
-	if server.PendingWriteNum <= 0 {
-		server.PendingWriteNum = 100
-		log.Release("invalid PendingWriteNum, reset to %v", server.PendingWriteNum)
-	}
+
 	if server.NewAgent == nil {
 		log.Fatal("NewAgent must not be nil")
 	}
-
-	server.ln = ln
-	server.conns = make(ConnSet)
 
 	// msg parser
 	msgParser := NewMsgParser()
 	msgParser.SetMsgLen(server.LenMsgLen, server.MinMsgLen, server.MaxMsgLen)
 	msgParser.SetByteOrder(server.LittleEndian)
 	msgParser.SetLenMsgLenInMsg(server.LenMsgLenInMsg)
-	server.msgParser = msgParser
-}
 
-func (server *TCPServer) run() {
-	server.wgLn.Add(1)
-	defer server.wgLn.Done()
+	go gnet.Serve(server, "tcp://"+server.Addr, gnet.WithTCPKeepAlive(time.Second*600), gnet.WithCodec(msgParser), gnet.WithReusePort(true), gnet.WithOutbuf(1024))
+}
+func (server *TCPServer) OnInitComplete(svr gnet.Server) gnet.Action {
+	server.Close = svr.Close
+	log.Release("leaf run tcpserver on " + server.Addr)
+	return gnet.None
+}
+func (server *TCPServer) OnOpened(c gnet.Conn) (out []byte, action gnet.Action) {
+	num := int(atomic.AddInt32(&server.connsNum, 1))
+	if num >= server.MaxConnNum {
+		log.Debug("too many connections")
+		return nil, gnet.Close
+	}
+	agent := server.NewAgent(gnetConn{c})
+	c.SetContext(agent)
+	agent.OnInit()
+	return
+}
+func (server *TCPServer) OnClosed(c gnet.Conn, err error) (action gnet.Action) {
+	log.Debug("gnet close %v", err)
+	atomic.AddInt32(&server.connsNum, -1)
+	switch agent := c.Context().(type) {
+	case Agent:
+		agent.OnClose()
+	}
+	c.SetContext(nil)
+	return
+}
+func (server *TCPServer) React(data []byte, c gnet.Conn) (action gnet.Action) {
 	defer Recover()
+	switch agent := c.Context().(type) {
+	case Agent:
+		agent.React(data)
 
-	var tempDelay time.Duration
-	for {
-		conn, err := server.ln.Accept()
-		if err != nil {
-			if ne, ok := err.(net.Error); ok && ne.Temporary() {
-				if tempDelay == 0 {
-					tempDelay = 5 * time.Millisecond
-				} else {
-					tempDelay *= 2
-				}
-				if max := 1 * time.Second; tempDelay > max {
-					tempDelay = max
-				}
-				log.Release("accept error: %v; retrying in %v", err, tempDelay)
-				time.Sleep(tempDelay)
-				continue
-			}
-			return
-		}
-		tempDelay = 0
-
-		server.mutexConns.Lock()
-		if len(server.conns) >= server.MaxConnNum {
-			server.mutexConns.Unlock()
-			conn.Close()
-			log.Debug("too many connections")
-			continue
-		}
-		server.conns[conn] = struct{}{}
-		server.mutexConns.Unlock()
-
-		server.wgConns.Add(1)
-
-		tcpConn := newTCPConn(conn, server.PendingWriteNum, server.msgParser, server.ChanStop)
-		agent := server.NewAgent(tcpConn)
-		go func() {
-			defer func() {
-				Recover()
-				agent.OnClose()
-			}()
-			agent.Run()
-
-			// cleanup
-			tcpConn.Close()
-			server.mutexConns.Lock()
-			delete(server.conns, conn)
-			server.mutexConns.Unlock()
-
-			server.wgConns.Done()
-		}()
+	default:
+		return gnet.Close
 	}
+	return
 }
-
-func (server *TCPServer) Close() {
-	server.ln.Close()
-	server.wgLn.Wait()
-
-	server.mutexConns.Lock()
-	for conn := range server.conns {
-		conn.Close()
-	}
-	server.conns = nil
-	server.mutexConns.Unlock()
-	server.wgConns.Wait()
-}
-
 func Recover() {
 	if err := recover(); err != nil {
 		stack := debug.Stack()

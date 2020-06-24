@@ -1,14 +1,15 @@
 package leaf
 
 import (
-	"github.com/name5566/leaf/cluster"
-	"github.com/name5566/leaf/conf"
-	"github.com/name5566/leaf/console"
-	"github.com/name5566/leaf/log"
-	"github.com/name5566/leaf/module"
 	"os"
 	"os/signal"
 	"syscall"
+
+	"github.com/luyu6056/leaf/cluster"
+	"github.com/luyu6056/leaf/conf"
+	"github.com/luyu6056/leaf/console"
+	"github.com/luyu6056/leaf/log"
+	"github.com/luyu6056/leaf/module"
 )
 
 var serverName = ""
@@ -41,7 +42,7 @@ func Run(mods ...module.Module) {
 	// console
 	console.Init()
 
-	log.Release(">>>>>>>>>>>>>>>> %s Leaf-%v starting up! <<<<<<<<<<<<<<<<<", serverName, version)
+	log.Release(">>>>>>>>>>>>>>>> %s Leaf starting up! <<<<<<<<<<<<<<<<<", serverName)
 
 	// close
 	c := make(chan os.Signal, 1)

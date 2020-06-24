@@ -5,10 +5,9 @@ import (
 	"crypto/aes"
 	"crypto/cipher"
 	"encoding/binary"
-	//"github.com/name5566/leaf/log"
-	//"runtime"
-	//"runtime/debug"
 	"sync"
+
+	"github.com/luyu6056/tls"
 )
 
 func READ_int8(bin []byte) (*int8, []byte) {
@@ -54,6 +53,10 @@ func WRITE_string(data *string, buf *bytes.Buffer) {
 
 }
 
+var msgbufpool = sync.Pool{New: func() interface{} {
+	return &tls.MsgBuffer{}
+}}
+
 type BaseProcessor struct {
 	call_back func(interface{}, interface{})
 	is_aes    bool
@@ -68,14 +71,14 @@ func NewBaseProcessor(call_back func(interface{}, interface{}), is_aes bool) *Ba
 	return p
 }
 
-func (p *BaseProcessor) Route(buf, buf1 []byte, userData interface{}) error {
+func (p *BaseProcessor) Route(in []byte, userData interface{}) error {
 	//这里捕获下异常吧,万一操作错误,免得玩家断线啥的
 
 	var b []byte
 	if p.is_aes {
-		b = msg_aes_decrypt(buf, buf1)
+		b = msg_aes_decrypt(in)
 	} else {
-		b = buf
+		b = in
 	}
 	p.call_back(b, userData)
 	return nil
@@ -87,73 +90,60 @@ func (p *BaseProcessor) Unmarshal(data []byte) ([]byte, error) {
 }
 
 // goroutine safe
-func (p *BaseProcessor) Marshal(msg interface{}, b []byte, buf *bytes.Buffer) ([][]byte, error) {
+func (p *BaseProcessor) Marshal(msg []byte) ([]byte, error) {
 	if p.is_aes {
-		buf.Reset()
-		buf.Write(msg.([]byte))
-		data := msg_aes_encrypt(b, buf)
-		return [][]byte{data}, nil
+		return msg_aes_encrypt(msg), nil
 	}
-	return [][]byte{msg.([]byte)}, nil
+	return msg, nil
 }
 
-func msg_aes_encrypt(b []byte, buf *bytes.Buffer) []byte {
-	buf.Write(make([]byte, 16-buf.Len()%16))
+func msg_aes_encrypt(b []byte) []byte {
+	if len(b)%16 > 0 {
+		b = append(b, make([]byte, 16-len(b)%16)...)
+	}
+	buf := msgbufpool.Get().(*tls.MsgBuffer)
+	defer msgbufpool.Put(buf)
+	buf.Reset()
+	buf.Write(b)
 	buf.Write(buf.Next(4))
-	return aesEncrypt(b, buf.Bytes())
+	return aesEncrypt(buf.Bytes(), b)
 }
 
-func msg_aes_decrypt(buf, buf1 []byte) []byte {
-	bin, ok := aesDecrypt(buf, buf1)
+func msg_aes_decrypt(in []byte) []byte {
+	buf, ok := aesDecrypt(in)
+	defer msgbufpool.Put(buf)
 	if !ok {
 		return nil
 	}
-	length := len(bin)
+	length := buf.Len()
 	//msg := make([]byte, len(buf))
-	copy(buf, bin[length-4:])
-	copy(buf[4:], bin[:length-4])
-	return buf
+	copy(in, buf.Bytes()[length-4:])
+	copy(in[4:], buf.Bytes()[:length-4])
+	return in
 
 }
 
 //var g_aeskey []byte = []byte("jin_tian_ni_chi_le_mei_you?chi_l")
-var aes_pool = &sync.Pool{
-	New: func() interface{} {
-		block, _ := aes.NewCipher(*aeskey1) //g_aeskey[:16]
-		return &block
-	},
+
+var block, _ = aes.NewCipher(aeskey1) //g_aeskey[:16]
+
+var aeskey1 = []byte{106, 105, 110, 95, 116, 105, 97, 110, 95, 110, 105, 95, 99, 104, 105, 95}
+var aeskey2 = []byte{108, 101, 95, 109, 101, 105, 95, 121, 111, 117, 63, 99, 104, 105, 95, 108}
+
+func aesEncrypt(in, out []byte) []byte {
+	blockMode := cipher.NewCBCEncrypter(block, aeskey2) // g_aeskey[16:]
+	blockMode.CryptBlocks(out, in)
+	return out
 }
 
-var aeskey1 = &[]byte{106, 105, 110, 95, 116, 105, 97, 110, 95, 110, 105, 95, 99, 104, 105, 95}
-var aeskey2 = &[]byte{108, 101, 95, 109, 101, 105, 95, 121, 111, 117, 63, 99, 104, 105, 95, 108}
-
-func aesEncrypt(b []byte, origData []byte) []byte {
-	//block := <-aes_chan
-	block := aes_pool.Get().(*cipher.Block)
-	blockMode := cipher.NewCBCEncrypter(*block, *aeskey2) // g_aeskey[16:]
-	if len(b) < len(origData) {
-		b = make([]byte, len(origData))
-	}
-	crypted := b[:len(origData)]
-	blockMode.CryptBlocks(crypted, origData)
-	//aes_chan <- block
-	aes_pool.Put(block)
-	return crypted
-}
-
-func aesDecrypt(crypted, origData []byte) ([]byte, bool) {
+func aesDecrypt(crypted []byte) (*tls.MsgBuffer, bool) {
 	if len(crypted)%16 > 0 {
 		return nil, false
 	}
-	if len(origData) < len(crypted) {
-		origData = make([]byte, len(crypted))
-	}
-	//block := <-aes_chan
-	block := aes_pool.Get().(*cipher.Block)
-	blockMode := cipher.NewCBCDecrypter(*block, *aeskey2) // g_aeskey[16:]
-	msg := origData[:len(crypted)]
-	blockMode.CryptBlocks(msg, crypted)
-	//aes_chan <- block
-	aes_pool.Put(block)
-	return msg, true
+	out := msgbufpool.Get().(*tls.MsgBuffer)
+	out.Reset()
+	origData := out.Make(len(crypted))
+	blockMode := cipher.NewCBCDecrypter(block, aeskey2) // g_aeskey[16:]
+	blockMode.CryptBlocks(origData, crypted)
+	return out, true
 }

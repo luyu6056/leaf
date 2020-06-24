@@ -1,6 +1,7 @@
 package network
 
 type Agent interface {
-	Run()
+	OnInit()
+	React([]byte)
 	OnClose()
 }

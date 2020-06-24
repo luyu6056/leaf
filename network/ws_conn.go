@@ -3,23 +3,21 @@ package network
 import (
 	//"bytes"
 	"errors"
-	"github.com/gorilla/websocket"
-	"github.com/name5566/leaf/log"
 	"net"
 	"sync"
-)
 
-type WebsocketConnSet map[*websocket.Conn]struct{}
+	"github.com/luyu6056/leaf/log"
+)
 
 type WSConn struct {
 	sync.Mutex
-	conn      *websocket.Conn
+	conn      Conn
 	writeChan chan []byte
 	maxMsgLen uint32
 	closeFlag bool
 }
 
-func newWSConn(conn *websocket.Conn, pendingWriteNum int, maxMsgLen uint32) *WSConn {
+func newWSConn(conn Conn, pendingWriteNum int, maxMsgLen uint32) *WSConn {
 	wsConn := new(WSConn)
 	wsConn.conn = conn
 	wsConn.writeChan = make(chan []byte, pendingWriteNum)
@@ -31,7 +29,7 @@ func newWSConn(conn *websocket.Conn, pendingWriteNum int, maxMsgLen uint32) *WSC
 				break
 			}
 
-			err := conn.WriteMessage(websocket.BinaryMessage, b)
+			err := conn.WriteMsg(b)
 			if err != nil {
 				break
 			}
@@ -47,7 +45,7 @@ func newWSConn(conn *websocket.Conn, pendingWriteNum int, maxMsgLen uint32) *WSC
 }
 
 func (wsConn *WSConn) doDestroy() {
-	wsConn.conn.UnderlyingConn().(*net.TCPConn).SetLinger(0)
+
 	wsConn.conn.Close()
 
 	if !wsConn.closeFlag {
@@ -63,15 +61,16 @@ func (wsConn *WSConn) Destroy() {
 	wsConn.doDestroy()
 }
 
-func (wsConn *WSConn) Close() {
+func (wsConn *WSConn) Close() error {
 	wsConn.Lock()
 	defer wsConn.Unlock()
 	if wsConn.closeFlag {
-		return
+		return nil
 	}
 
 	wsConn.doWrite(nil)
 	wsConn.closeFlag = true
+	return nil
 }
 
 func (wsConn *WSConn) doWrite(b []byte) {
@@ -94,12 +93,12 @@ func (wsConn *WSConn) RemoteAddr() net.Addr {
 
 // goroutine not safe
 func (wsConn *WSConn) ReadMsg(buf []byte) ([]byte, error) {
-	_, b, err := wsConn.conn.ReadMessage()
+	b, err := wsConn.conn.ReadMsg(nil)
 	return b, err
 }
 
 // args must not be modified by the others goroutines
-func (wsConn *WSConn) WriteMsg(args ...[]byte) error {
+func (wsConn *WSConn) WriteMsg(msg []byte) error {
 	wsConn.Lock()
 	defer wsConn.Unlock()
 	if wsConn.closeFlag {
@@ -107,10 +106,7 @@ func (wsConn *WSConn) WriteMsg(args ...[]byte) error {
 	}
 
 	// get len
-	var msgLen uint32
-	for i := 0; i < len(args); i++ {
-		msgLen += uint32(len(args[i]))
-	}
+	var msgLen = uint32(len(msg))
 
 	// check len
 	if msgLen > wsConn.maxMsgLen {
@@ -119,20 +115,7 @@ func (wsConn *WSConn) WriteMsg(args ...[]byte) error {
 		return errors.New("message too short")
 	}
 
-	// don't copy
-	if len(args) == 1 {
-		wsConn.doWrite(args[0])
-		return nil
-	}
-
 	// merge the args
-	msg := make([]byte, msgLen)
-	l := 0
-	for i := 0; i < len(args); i++ {
-		copy(msg[l:], args[i])
-		l += len(args[i])
-	}
-
 	wsConn.doWrite(msg)
 
 	return nil

@@ -1,12 +1,13 @@
 package module
 
 import (
-	"github.com/name5566/leaf/chanrpc"
-	"github.com/name5566/leaf/console"
-	"github.com/name5566/leaf/go"
-	//"github.com/name5566/leaf/log"
-	"github.com/name5566/leaf/timer"
 	"time"
+
+	"github.com/luyu6056/leaf/chanrpc"
+	"github.com/luyu6056/leaf/console"
+	g "github.com/luyu6056/leaf/go"
+
+	"github.com/luyu6056/leaf/timer"
 )
 
 type Skeleton struct {

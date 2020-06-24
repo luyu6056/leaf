@@ -1,4 +1,4 @@
-module dyb
+module github.com/luyu6056/leaf/network/dyb
 
 go 1.14
 

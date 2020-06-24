@@ -1,10 +1,11 @@
 package timer
 
 import (
-	"github.com/name5566/leaf/conf"
-	"github.com/name5566/leaf/log"
 	"runtime"
 	"time"
+
+	"github.com/luyu6056/leaf/conf"
+	"github.com/luyu6056/leaf/log"
 )
 
 // one dispatcher per goroutine (goroutine not safe)
