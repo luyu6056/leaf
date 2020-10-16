@@ -347,3 +347,63 @@ func Daemon(logdir string) {
 		time.Sleep(time.Second * 5)
 	}
 }
+func StringToStartEndTime(str, split string) (bool, int32, int32) {
+	a := strings.Split(str, split)
+	b, err := strconv.Atoi(a[0])
+	if err != nil {
+		return false, 0, 0
+	}
+	c, err := strconv.Atoi(a[1])
+	if err != nil {
+		return false, 0, 0
+	}
+	return true, int32(b), int32(c)
+}
+func SliceInt32Repeat(s []int32) bool {
+	m := make(map[int32]interface{}, 0)
+	for _, v := range s {
+		if _, ok := m[v]; ok {
+			return true
+		}
+		m[v] = struct{}{}
+	}
+	return false
+}
+func GetDeviceType(device string) int {
+
+	if strings.Contains(device, "Android") {
+		return 0
+	} else if strings.Contains(device, "iOS") {
+		return 1
+	} else {
+		return 2
+	}
+}
+
+// 传入时间
+// 判断是否与今天为同一天
+func IsSameDay(inTime time.Time) bool {
+
+	return time.Now().Day() == inTime.Day()
+}
+
+// 为传入时间的多少天
+func SeparatedDay(t1, t2 time.Time) int32 {
+	t1 = time.Date(t1.Year(), t1.Month(), t1.Day(), 0, 0, 0, 0, time.Local)
+	t2 = time.Date(t2.Year(), t2.Month(), t2.Day(), 0, 0, 0, 0, time.Local)
+	a := int32(t1.Sub(t2).Hours() / 24)
+	if a < 0 {
+		a *= -1
+	}
+	return a + 1
+}
+func GetDeviceName(device string) string {
+
+	if strings.Contains(device, "Android") {
+		return "android"
+	} else if strings.Contains(device, "iOS") {
+		return "ios"
+	} else {
+		return "other"
+	}
+}
